@@ -1,0 +1,16 @@
+# Runtime and environment
+data/
+downloads/
+cache/
+
+# Logs and debug artifacts
+debug.log
+error_log
+*.log
+
+# System files
+.DS_Store
+
+# Build/archives
+Archive.zip
+
