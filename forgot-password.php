@@ -29,15 +29,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 } else {
                     $result = user_generate_reset_token($email);
                     if ($result['success']) {
-                        // In a real app, you'd send an email here
-                        // For now, we'll show the reset link directly
+                        // Send email with reset link
                         $reset_link = base_url('reset-password.php?token=' . $result['token']);
-                        $msg = 'Password reset requested! Use this link: <a href="' . htmlspecialchars($reset_link) . '" class="text-blue-400 underline">' . htmlspecialchars($reset_link) . '</a>';
+                        $subject = 'Reset Password - MusicFLAC';
+                        $message = "Ciao,\n\nHai richiesto il reset della password per il tuo account MusicFLAC.\n\nClicca sul seguente link per reimpostare la password:\n" . $reset_link . "\n\nQuesto link è valido per 2 ore.\n\nSe non hai richiesto questo reset, ignora questa email.\n\nGrazie,\nTeam MusicFLAC";
+                        $headers = "From: noreply@musicflac.com\r\n";
+                        $headers .= "Reply-To: noreply@musicflac.com\r\n";
+                        $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
+                        
+                        if (mail($email, $subject, $message, $headers)) {
+                            $msg = 'Se l\'email esiste nel nostro sistema, riceverai un link per il reset della password.';
+                        } else {
+                            $msg = 'Se l\'email esiste nel nostro sistema, riceverai un link per il reset della password.';
+                        }
                         $step = 'token_sent';
                         $_SESSION['last_reset_request'] = $now;
                     } else {
                         // Don't reveal if email exists or not for security
-                        $msg = 'If the email exists in our system, a reset link has been generated.';
+                        $msg = 'Se l\'email esiste nel nostro sistema, riceverai un link per il reset della password.';
                         $step = 'token_sent';
                         $_SESSION['last_reset_request'] = $now;
                     }
@@ -108,14 +117,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     <div class="text-center">
                         <i class="fas fa-envelope-open-text text-4xl text-green-400 mb-4"></i>
                         <h3 class="text-xl font-semibold text-white mb-4">Reset richiesto!</h3>
-                        <p class="text-gray-300 mb-6">Controlla il messaggio sopra per il link di reset.</p>
+                        <p class="text-gray-300 mb-6">Controlla la tua email per il link di reset della password.</p>
                         
-                        <div class="bg-yellow-900 bg-opacity-30 border border-yellow-700 rounded-lg p-4 mb-6">
-                            <p class="text-yellow-200 text-sm">
-                                <i class="fas fa-exclamation-triangle mr-2"></i>
-                                <strong>Nota:</strong> Normalmente invieremmo un'email, ma per ora il link è mostrato direttamente sopra.
-                            </p>
-                        </div>
                         
                         <a href="forgot-password.php" class="inline-block text-blue-400 hover:text-blue-300">
                             <i class="fas fa-redo mr-1"></i> Richiedi un altro reset

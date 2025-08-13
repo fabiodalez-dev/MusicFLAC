@@ -340,7 +340,7 @@ function user_login(string $username, string $password): array {
     }
     
     try {
-        $stmt = $db->prepare('SELECT id, username, email, password_hash, is_active, is_admin FROM users WHERE username = ? OR email = ?');
+        $stmt = $db->prepare('SELECT id, username, email, password_hash, is_active, is_admin FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)');
         $stmt->execute([$username, $username]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -454,7 +454,7 @@ function user_generate_reset_token(string $email): array {
     }
     
     try {
-        $stmt = $db->prepare('SELECT id FROM users WHERE email = ?');
+        $stmt = $db->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)');
         $stmt->execute([$email]);
         $user = $stmt->fetch();
         
