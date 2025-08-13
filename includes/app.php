@@ -276,10 +276,18 @@ function app_job_start(string $job_id, int $total, string $type = 'album'): void
 }
 
 function app_job_increment_complete(string $job_id): void {
-    try { $db = app_db(); $db->exec("UPDATE jobs SET completed = completed + 1 WHERE job_id = '" . str_replace("'","''", $job_id) . "'");
-        $st = $db->prepare('SELECT total, completed FROM jobs WHERE job_id = ?'); $st->execute([$job_id]); $r = $st->fetch(PDO::FETCH_ASSOC);
-        if ($r && (int)$r['completed'] >= (int)$r['total']) { $end = $db->prepare('UPDATE jobs SET finished_at = datetime(\'now\') WHERE job_id = ?'); $end->execute([$job_id]); }
-    } catch (Throwable $e) { debug_log('job_inc_error',['e'=>$e->getMessage()]); }
+    try {
+        $db = app_db();
+        $inc = $db->prepare('UPDATE jobs SET completed = completed + 1 WHERE job_id = ?');
+        $inc->execute([$job_id]);
+        $st = $db->prepare('SELECT total, completed FROM jobs WHERE job_id = ?');
+        $st->execute([$job_id]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if ($r && (int)$r['completed'] >= (int)$r['total']) {
+            $end = $db->prepare('UPDATE jobs SET finished_at = datetime(\'now\') WHERE job_id = ?');
+            $end->execute([$job_id]);
+        }
+    } catch (Throwable $e) { debug_log('job_inc_error',[ 'e' => $e->getMessage() ]); }
 }
 
 function app_job_get(string $job_id): array {

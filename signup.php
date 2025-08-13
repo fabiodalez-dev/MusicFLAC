@@ -3,6 +3,12 @@
 error_reporting(E_ALL);
 require_once __DIR__ . '/includes/bootstrap.php';
 
+// Disable signup when in production mode
+if ((int)app_get_setting('production_mode', 0) === 1) {
+    header('Location: login.php');
+    exit;
+}
+
 $msg = '';
 $err = '';
 $csrf = app_csrf_token();

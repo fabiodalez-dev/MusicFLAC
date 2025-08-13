@@ -5,6 +5,11 @@ ini_set('display_errors', 1);
 
 session_start();
 
+// Generate CSRF token for upgrade form
+if (empty($_SESSION['upgrade_csrf'])) {
+    $_SESSION['upgrade_csrf'] = bin2hex(random_bytes(16));
+}
+
 // Check if user is admin
 if (!isset($_SESSION['is_admin']) || !$_SESSION['is_admin']) {
     header('Location: ../login.php');
@@ -37,24 +42,56 @@ foreach ($available_upgrades as $version => $description) {
 
 // Handle upgrade process
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upgrade'])) {
+    // CSRF protection
+    if (!isset($_POST['csrf']) || !hash_equals($_SESSION['upgrade_csrf'] ?? '', $_POST['csrf'] ?? '')) {
+        die('CSRF token mismatch');
+    }
+    
     $target_version = $_POST['version'] ?? '';
+    
+    // CRITICAL SECURITY: Strict validation of version parameter
+    if (!preg_match('/^[0-9]+\.[0-9]+\.[0-9]+$/', $target_version)) {
+        die('Invalid version format');
+    }
     
     if (isset($available_upgrades[$target_version])) {
         // In a real scenario, this would download and apply the upgrade
         // For now, we'll just simulate the process
         
-        // Update version in version.php
-        $version_file = __DIR__ . '/../includes/version.php';
-        $content = "<?php
-// Application version
-define('APP_VERSION', '$target_version');
-define('APP_NAME', 'SpotiFLAC');
-";
-        file_put_contents($version_file, $content);
+        // SECURITY: Validate file path and prevent directory traversal
+        $version_file = realpath(__DIR__ . '/../includes') . '/version.php';
+        $includes_dir = realpath(__DIR__ . '/../includes');
+        
+        if (!$includes_dir || strpos($version_file, $includes_dir) !== 0) {
+            die('Invalid file path');
+        }
+        
+        // SECURITY: Sanitize content to prevent code injection
+        $safe_version = preg_replace('/[^0-9\.]/', '', $target_version);
+        $content = "<?php\n// Application version\ndefine('APP_VERSION', " . var_export($safe_version, true) . ");\ndefine('APP_NAME', 'SpotiFLAC');\n";
+        
+        // SECURITY: Atomic write with proper permissions
+        $temp_file = $version_file . '.tmp';
+        if (file_put_contents($temp_file, $content, LOCK_EX) === false) {
+            die('Failed to write version file');
+        }
+        
+        if (!rename($temp_file, $version_file)) {
+            @unlink($temp_file);
+            die('Failed to update version file');
+        }
+        
+        // Set secure permissions
+        @chmod($version_file, 0644);
+        
+        // Log security event
+        error_log("[SECURITY] Version upgraded to $safe_version by admin user");
         
         // Redirect to show success
-        header('Location: ?upgraded=true&version=' . urlencode($target_version));
+        header('Location: ?upgraded=true&version=' . urlencode($safe_version));
         exit;
+    } else {
+        die('Invalid version selected');
     }
 }
 
@@ -104,6 +141,7 @@ $upgraded_version = $_GET['version'] ?? '';
                     </div>
                     
                     <form method=\"post\">
+                        <input type=\"hidden\" name=\"csrf\" value=\"<?= htmlspecialchars($_SESSION['upgrade_csrf']) ?>\">
                         <input type=\"hidden\" name=\"version\" value=\"<?= htmlspecialchars($latest_version) ?>\">
                         <button type=\"submit\" name=\"upgrade\" value=\"1\" class=\"w-full px-4 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-semibold\">
                             Esegui aggiornamento

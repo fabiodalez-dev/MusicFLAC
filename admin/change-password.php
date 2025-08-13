@@ -1,8 +1,5 @@
 <?php
-@ini_set('display_errors','0');
-error_reporting(E_ALL);
-require_once __DIR__ . '/../includes/app.php';
-require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/bootstrap.php';
 
 // Redirect to installer if app not installed
 if (!app_is_installed()) { header('Location: ' . base_url('installer/install.php')); exit; }

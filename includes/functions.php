@@ -54,8 +54,18 @@ function sanitizeFilename($filename) {
 }
 
 function command_exists($cmd) {
+    // Enhanced security: whitelist allowed commands
+    $allowed_commands = ['metaflac', 'ffmpeg', 'ffprobe'];
+    if (!in_array(basename($cmd), $allowed_commands)) {
+        return false;
+    }
+    
     $where = stripos(PHP_OS, 'WIN') === 0 ? 'where' : 'command -v';
     $out = [];
+    // Additional validation of command name
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $cmd)) {
+        return false;
+    }
     @exec($where . ' ' . escapeshellarg($cmd), $out, $code);
     return $code === 0 && !empty($out);
 }
@@ -64,16 +74,27 @@ function embed_flac_metadata($filepath, array $track): bool {
     if (!is_file($filepath)) return false;
     if (strtolower(pathinfo($filepath, PATHINFO_EXTENSION)) !== 'flac') return false;
     if (!command_exists('metaflac')) return false;
+    
+    // Enhanced security: validate file path
+    try {
+        security_check_file_access($filepath, [DOWNLOAD_DIR]);
+    } catch (Exception $e) {
+        error_log("[SECURITY] Blocked metadata embed for file: $filepath - " . $e->getMessage());
+        return false;
+    }
 
-    $title = $track['name'] ?? '';
-    $artist = $track['artists'] ?? '';
-    $album = $track['album'] ?? '';
-    $tracknum = (string)($track['track_number'] ?? '');
-    $date = $track['release_date'] ?? '';
-    $isrc = $track['isrc'] ?? '';
+    // Sanitize all metadata values to prevent injection
+    $title = security_validate_input($track['name'] ?? '', 'string', 200);
+    $artist = security_validate_input($track['artists'] ?? '', 'string', 200);
+    $album = security_validate_input($track['album'] ?? '', 'string', 200);
+    $tracknum = security_validate_input((string)($track['track_number'] ?? ''), 'alphanumeric', 10);
+    $date = security_validate_input($track['release_date'] ?? '', 'alphanumeric', 20);
+    $isrc = security_validate_input($track['isrc'] ?? '', 'alphanumeric', 20);
 
     // Clean existing tags
-    @exec('metaflac --remove-all ' . escapeshellarg($filepath));
+    $cmd = 'metaflac --remove-all ' . escapeshellarg($filepath);
+    security_prevent_command_injection($cmd);
+    @exec($cmd);
 
     $tags = [];
     if ($title) $tags[] = 'TITLE=' . $title;
@@ -84,19 +105,74 @@ function embed_flac_metadata($filepath, array $track): bool {
     if ($isrc) $tags[] = 'ISRC=' . $isrc;
 
     foreach ($tags as $t) {
-        @exec('metaflac --set-tag=' . escapeshellarg($t) . ' ' . escapeshellarg($filepath));
+        $cmd = 'metaflac --set-tag=' . escapeshellarg($t) . ' ' . escapeshellarg($filepath);
+        try {
+            security_prevent_command_injection($cmd);
+            @exec($cmd);
+        } catch (Exception $e) {
+            error_log("[SECURITY] Blocked potentially dangerous metaflac command: $cmd");
+        }
     }
 
-    // Cover art from track image
+    // Cover art from track image - SECURITY: Use only service-provided URLs
     $img_url = $track['images'] ?? '';
     if ($img_url) {
-        $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cover_' . uniqid() . '.jpg';
-        $img = http_get($img_url, ['User-Agent' => 'Mozilla/5.0'], 15);
-        if ($img) {
-            file_put_contents($tmp, $img);
-            @exec('metaflac --remove --block-type=PICTURE ' . escapeshellarg($filepath));
-            @exec('metaflac --import-picture-from=' . escapeshellarg($tmp) . ' ' . escapeshellarg($filepath));
-            @unlink($tmp);
+        try {
+            // CRITICAL SECURITY: Strict URL validation to prevent SSRF/LFI
+            if (!is_safe_url($img_url)) {
+                throw new Exception('Unsafe cover art URL blocked');
+            }
+            
+            // Additional validation: must be HTTPS and from trusted domains
+            $parsed = parse_url($img_url);
+            if (!$parsed || ($parsed['scheme'] ?? '') !== 'https') {
+                throw new Exception('Cover art URL must be HTTPS');
+            }
+            
+            // Whitelist trusted domains for cover art
+            $allowed_cover_domains = [
+                'i.scdn.co', 'mosaic.scdn.co', 'image-cdn-ak.spotifycdn.com',
+                'images.genius.com', 'cdns-images.dzcdn.net', 
+                'images.qobuz.com', 'resources.tidal.com'
+            ];
+            
+            $host = strtolower($parsed['host'] ?? '');
+            $allowed = false;
+            foreach ($allowed_cover_domains as $domain) {
+                if ($host === $domain || (strlen($host) > strlen($domain) && substr($host, -strlen('.' . $domain)) === '.' . $domain)) {
+                    $allowed = true;
+                    break;
+                }
+            }
+            
+            if (!$allowed) {
+                throw new Exception('Cover art domain not in whitelist: ' . $host);
+            }
+            
+            $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cover_' . uniqid() . '.jpg';
+            $img = http_get($img_url, ['User-Agent' => 'Mozilla/5.0'], 15);
+            if ($img && strlen($img) > 0 && strlen($img) < 5242880) { // Max 5MB
+                // Validate image content
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detected_type = $finfo->buffer($img);
+                if (!in_array($detected_type, ['image/jpeg', 'image/png', 'image/webp'])) {
+                    throw new Exception('Invalid image type: ' . $detected_type);
+                }
+                
+                file_put_contents($tmp, $img);
+                
+                $cmd1 = 'metaflac --remove --block-type=PICTURE ' . escapeshellarg($filepath);
+                $cmd2 = 'metaflac --import-picture-from=' . escapeshellarg($tmp) . ' ' . escapeshellarg($filepath);
+                
+                security_prevent_command_injection($cmd1);
+                security_prevent_command_injection($cmd2);
+                
+                @exec($cmd1);
+                @exec($cmd2);
+                @unlink($tmp);
+            }
+        } catch (Exception $e) {
+            error_log("[SECURITY] Blocked cover art processing: " . $e->getMessage() . " - URL: " . $img_url);
         }
     }
     return true;
@@ -275,13 +351,59 @@ function createAlbumZip($tracks, $albumName, $service, ?string $job_id = null) {
         throw new Exception('Nessuna traccia scaricata con successo');
     }
 
-    // Fetch cover (from first track image) if available
+    // Fetch cover (from first track image) if available - SECURITY HARDENED
     $coverPath = null;
     if (!empty($tracks[0]['images'])) {
         $coverUrl = $tracks[0]['images'];
-        $coverPath = $tmp_dir . '/cover.jpg';
-        $img = http_get($coverUrl, ['User-Agent' => 'Mozilla/5.0'], 15);
-        if ($img) file_put_contents($coverPath, $img); else $coverPath = null;
+        try {
+            // CRITICAL SECURITY: Same strict validation as embed_flac_metadata
+            if (!is_safe_url($coverUrl)) {
+                throw new Exception('Unsafe cover URL blocked for ZIP');
+            }
+            
+            // Must be HTTPS and from trusted domains
+            $parsed = parse_url($coverUrl);
+            if (!$parsed || ($parsed['scheme'] ?? '') !== 'https') {
+                throw new Exception('Cover URL must be HTTPS for ZIP');
+            }
+            
+            // Whitelist trusted domains for cover art
+            $allowed_cover_domains = [
+                'i.scdn.co', 'mosaic.scdn.co', 'image-cdn-ak.spotifycdn.com',
+                'images.genius.com', 'cdns-images.dzcdn.net', 
+                'images.qobuz.com', 'resources.tidal.com'
+            ];
+            
+            $host = strtolower($parsed['host'] ?? '');
+            $allowed = false;
+            foreach ($allowed_cover_domains as $domain) {
+                if ($host === $domain || (strlen($host) > strlen($domain) && substr($host, -strlen('.' . $domain)) === '.' . $domain)) {
+                    $allowed = true;
+                    break;
+                }
+            }
+            
+            if (!$allowed) {
+                throw new Exception('Cover domain not in whitelist for ZIP: ' . $host);
+            }
+            
+            $coverPath = $tmp_dir . '/cover.jpg';
+            $img = http_get($coverUrl, ['User-Agent' => 'Mozilla/5.0'], 15);
+            if ($img && strlen($img) > 0 && strlen($img) < 5242880) { // Max 5MB
+                // Validate image content
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detected_type = $finfo->buffer($img);
+                if (!in_array($detected_type, ['image/jpeg', 'image/png', 'image/webp'])) {
+                    throw new Exception('Invalid image type for ZIP: ' . $detected_type);
+                }
+                file_put_contents($coverPath, $img);
+            } else {
+                $coverPath = null;
+            }
+        } catch (Exception $e) {
+            error_log("[SECURITY] Blocked ZIP cover processing: " . $e->getMessage() . " - URL: " . $coverUrl);
+            $coverPath = null;
+        }
     }
 
     $zip = new ZipArchive();

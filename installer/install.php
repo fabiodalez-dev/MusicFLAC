@@ -58,17 +58,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Token di sicurezza non valido. Riprova.';
     }
     if ($step === 1 && empty($errors)) {
-        // Directory permissions check
+        // Directory permissions check with security validation
         $required_dirs = [DATA_DIR, DOWNLOADS_DIR, ROOT_DIR . '/cache'];
-        foreach ($required_dirs as $dir) {
-            if (!is_dir($dir)) {
-                if (!mkdir($dir, 0755, true)) {
-                    $errors[] = "Impossibile creare la directory: $dir";
+        
+        // Validate that all required directories are within the application root
+        $safe_root = realpath(ROOT_DIR);
+        if (!$safe_root) {
+            $errors[] = "Impossibile determinare la directory root dell'applicazione";
+        } else {
+            foreach ($required_dirs as $dir) {
+                // Resolve and validate directory path
+                $resolved_dir = $dir;
+                if (!file_exists($dir)) {
+                    // Create parent directories if needed
+                    $parent = dirname($dir);
+                    if (!is_dir($parent)) {
+                        if (!mkdir($parent, 0755, true)) {
+                            $errors[] = "Impossibile creare la directory parent: $parent";
+                            continue;
+                        }
+                    }
                 }
-            }
-            
-            if (!is_writable($dir)) {
-                $errors[] = "La directory $dir non è scrivibile";
+                
+                // Security check: ensure directory is within application root
+                $real_dir = realpath(dirname($dir));
+                if (!$real_dir || strpos($real_dir, $safe_root) !== 0) {
+                    $errors[] = "Directory non sicura rilevata: $dir";
+                    continue;
+                }
+                
+                if (!is_dir($dir)) {
+                    if (!mkdir($dir, 0755, true)) {
+                        $errors[] = "Impossibile creare la directory: $dir";
+                        continue;
+                    }
+                    
+                    // Set secure permissions
+                    chmod($dir, 0755);
+                    
+                    // Create .htaccess to prevent direct access
+                    $htaccess_content = "Require all denied\nOptions -Indexes\n";
+                    if (strpos(basename($dir), 'downloads') === false) { // Allow downloads dir
+                        @file_put_contents($dir . '/.htaccess', $htaccess_content);
+                    }
+                }
+                
+                if (!is_writable($dir)) {
+                    $errors[] = "La directory $dir non è scrivibile";
+                }
             }
         }
         
@@ -76,27 +113,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $step = 2;
         }
     } elseif ($step === 2 && empty($errors)) {
-        // Admin user creation
+        // Admin user creation with enhanced security validation
         $username = trim($_POST['username'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $password = $_POST['password'] ?? '';
         $confirm_password = $_POST['confirm_password'] ?? '';
         
-        // Validation
-        if (empty($username) || strlen($username) < 3) {
-            $errors[] = 'Il nome utente deve essere lungo almeno 3 caratteri';
+        // Enhanced validation
+        if (empty($username) || strlen($username) < 3 || strlen($username) > 50) {
+            $errors[] = 'Il nome utente deve essere lungo tra 3 e 50 caratteri';
         }
         
-        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'Email non valida';
+        // Username security check
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $username)) {
+            $errors[] = 'Il nome utente può contenere solo lettere, numeri, _ e -';
         }
         
-        if (empty($password) || strlen($password) < 6) {
-            $errors[] = 'La password deve essere lunga almeno 6 caratteri';
+        // Check for dangerous usernames
+        $forbidden_usernames = ['admin', 'root', 'administrator', 'system', 'guest', 'test', 'null', 'undefined'];
+        if (in_array(strtolower($username), $forbidden_usernames)) {
+            $errors[] = 'Nome utente non consentito';
+        }
+        
+        if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) {
+            $errors[] = 'Email non valida o troppo lunga';
+        }
+        
+        // Strong password requirements
+        if (empty($password) || strlen($password) < 8 || strlen($password) > 128) {
+            $errors[] = 'La password deve essere lunga tra 8 e 128 caratteri';
+        }
+        
+        // Password complexity check
+        if (!preg_match('/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).*$/', $password)) {
+            $errors[] = 'La password deve contenere almeno una lettera minuscola, una maiuscola e un numero';
         }
         
         if ($password !== $confirm_password) {
             $errors[] = 'Le password non coincidono';
+        }
+        
+        // Check for common weak passwords
+        $weak_passwords = ['password', '12345678', 'admin123', 'password123', 'qwerty123'];
+        if (in_array(strtolower($password), $weak_passwords)) {
+            $errors[] = 'Password troppo debole';
         }
         
         if (empty($errors)) {

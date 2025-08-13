@@ -1,8 +1,5 @@
 <?php
-session_start();
-require_once 'includes/config.php';
-require_once 'includes/app.php';
-require_once 'includes/auth.php';
+require_once __DIR__ . '/includes/bootstrap.php';
 require_once 'includes/functions.php';
 
 // Function to format date as dd-MM-YYYY
@@ -41,10 +38,25 @@ if (function_exists('app_service_enabled') && !app_service_enabled($service)) {
 
 // Handle download actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Rate limiting for downloads
+    try {
+        security_rate_limit('download', 10, 100); // 10/min, 100/hour
+    } catch (Exception $e) {
+        http_response_code(429);
+        die('Too many download requests');
+    }
+    
     if (isset($_POST['download_track'])) {
         // Download single track
         $trackIndex = (int)$_POST['track_index'];
+        
+        // Validate track index
         $tracks = $metadata['track_list'] ?? [$metadata['track']];
+        if ($trackIndex < 0 || $trackIndex >= count($tracks)) {
+            http_response_code(400);
+            die('Invalid track index');
+        }
+        
         $track = $tracks[$trackIndex];
         
         $filepath = downloadTrack($track, $service);
@@ -54,20 +66,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($filepath && file_exists($filepath)) {
-            // Set headers for download
-            header('Content-Description: File Transfer');
-            header('Content-Type: application/octet-stream');
-            header('Content-Disposition: attachment; filename="' . basename($filepath) . '"');
-            header('Expires: 0');
-            header('Cache-Control: must-revalidate');
-            header('Pragma: public');
-            header('Content-Length: ' . filesize($filepath));
-            readfile($filepath);
-            // Remove the file immediately after sending
-            if (file_exists($filepath)) {
-                @unlink($filepath);
+            // SECURITY: Validate file path before download
+            try {
+                security_check_file_access($filepath, [DOWNLOAD_DIR]);
+                
+                // Enhanced security headers
+                header('X-Content-Type-Options: nosniff');
+                header('X-Frame-Options: DENY');
+                header('X-XSS-Protection: 1; mode=block');
+                header('Referrer-Policy: no-referrer');
+                header('Content-Security-Policy: default-src \"none\"');
+                
+                // Set headers for download
+                header('Content-Description: File Transfer');
+                header('Content-Type: application/octet-stream');
+                
+                // Sanitize filename
+                $safe_filename = preg_replace('/[^\\w\\s\\-\\.]/u', '', basename($filepath));
+                header('Content-Disposition: attachment; filename="' . $safe_filename . '"');
+                header('Expires: 0');
+                header('Cache-Control: no-store, no-cache, must-revalidate');
+                header('Pragma: no-cache');
+                
+                // File size limit check
+                $filesize = filesize($filepath);
+                if ($filesize > 104857600) { // 100MB
+                    throw new Exception('File too large');
+                }
+                
+                header('Content-Length: ' . $filesize);
+                readfile($filepath);
+                
+                // Remove the file immediately after sending
+                if (file_exists($filepath)) {
+                    @unlink($filepath);
+                }
+                exit;
+            } catch (Exception $e) {
+                error_log("[SECURITY] Blocked download attempt: " . $e->getMessage() . " - File: $filepath");
+                http_response_code(403);
+                die('Access denied');
             }
-            exit;
         }
     } elseif (isset($_POST['download_album'])) {
         // Download entire album/playlist as ZIP
@@ -81,20 +120,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($zipFilepath && file_exists($zipFilepath)) {
-            // Set headers for download
-            header('Content-Description: File Transfer');
-            header('Content-Type: application/zip');
-            header('Content-Disposition: attachment; filename="' . basename($zipFilepath) . '"');
-            header('Expires: 0');
-            header('Cache-Control: must-revalidate');
-            header('Pragma: public');
-            header('Content-Length: ' . filesize($zipFilepath));
-            readfile($zipFilepath);
-            // Remove the file immediately after sending
-            if (file_exists($zipFilepath)) {
-                @unlink($zipFilepath);
+            // SECURITY: Validate ZIP file path before download
+            try {
+                security_check_file_access($zipFilepath, [DOWNLOAD_DIR]);
+                
+                // Enhanced security headers
+                header('X-Content-Type-Options: nosniff');
+                header('X-Frame-Options: DENY');
+                header('X-XSS-Protection: 1; mode=block');
+                header('Referrer-Policy: no-referrer');
+                header('Content-Security-Policy: default-src \"none\"');
+                
+                // Set headers for download
+                header('Content-Description: File Transfer');
+                header('Content-Type: application/zip');
+                
+                // Sanitize filename
+                $safe_filename = preg_replace('/[^\\w\\s\\-\\.]/u', '', basename($zipFilepath));
+                header('Content-Disposition: attachment; filename="' . $safe_filename . '"');
+                header('Expires: 0');
+                header('Cache-Control: no-store, no-cache, must-revalidate');
+                header('Pragma: no-cache');
+                
+                // File size limit check
+                $filesize = filesize($zipFilepath);
+                if ($filesize > 524288000) { // 500MB for ZIP files
+                    throw new Exception('ZIP file too large');
+                }
+                
+                header('Content-Length: ' . $filesize);
+                readfile($zipFilepath);
+                
+                // Remove the file immediately after sending
+                if (file_exists($zipFilepath)) {
+                    @unlink($zipFilepath);
+                }
+                exit;
+            } catch (Exception $e) {
+                error_log("[SECURITY] Blocked ZIP download attempt: " . $e->getMessage() . " - File: $zipFilepath");
+                http_response_code(403);
+                die('Access denied');
             }
-            exit;
         }
     }
 }

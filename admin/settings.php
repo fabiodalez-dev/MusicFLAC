@@ -1,8 +1,5 @@
 <?php
-@ini_set('display_errors','0');
-error_reporting(E_ALL);
-require_once __DIR__ . '/../includes/app.php';
-require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/bootstrap.php';
 
 // Redirect to installer if app not installed
 if (!app_is_installed()) { header('Location: ' . base_url('installer/install.php')); exit; }
@@ -18,6 +15,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if (isset($_POST['frontend_debug'])) {
             $debugVal = ($_POST['frontend_debug'] === '1') ? '1' : '0';
             app_set_setting('frontend_debug', $debugVal);
+            $msg = 'Impostazioni salvate con successo';
+        }
+        // Handle production mode toggle
+        if (isset($_POST['production_mode'])) {
+            $prodVal = ($_POST['production_mode'] === '1') ? '1' : '0';
+            app_set_setting('production_mode', $prodVal);
             $msg = 'Impostazioni salvate con successo';
         }
         // Handle backend debug toggle (enable/disable debug.log)
@@ -86,6 +89,29 @@ $frontend_debug = (int)app_get_setting('frontend_debug', 0);
     <?php if ($err): ?><div class="mb-4 p-3 rounded border border-red-700 bg-red-900 bg-opacity-30 text-red-200"><?= htmlspecialchars($err) ?></div><?php endif; ?>
 
     <div class="grid md:grid-cols-2 gap-6">
+      <!-- Production Mode -->
+      <div class="card rounded-xl p-6">
+        <h2 class="text-lg font-semibold mb-4">Production Mode</h2>
+        <form method="post">
+          <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+          <input type="hidden" name="production_mode" value="0">
+          <?php $production_mode = (int)app_get_setting('production_mode', 0); ?>
+          <div class="mb-4 flex items-center justify-between">
+            <label class="block text-gray-300 mr-4" for="production_mode">Enable production hardening</label>
+            <label class="inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="production_mode" name="production_mode" value="1" class="hidden" <?= $production_mode === 1 ? 'checked' : '' ?>>
+              <span class="relative inline-block w-12 h-6 bg-gray-700 rounded-full transition">
+                <span class="dot absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition transform <?= $production_mode === 1 ? 'translate-x-6 bg-green-400' : '' ?>"></span>
+              </span>
+            </label>
+          </div>
+          <ul class="text-sm text-gray-400 list-disc ml-5 mb-4">
+            <li>Installer access is blocked</li>
+            <li>Signup link is hidden</li>
+          </ul>
+          <button class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded">Save</button>
+        </form>
+      </div>
       <!-- UI / Debug Settings -->
       <div class="card rounded-xl p-6">
         <h2 class="text-lg font-semibold mb-4">Interfaccia</h2>

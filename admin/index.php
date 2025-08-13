@@ -37,10 +37,7 @@ try {
     exit;
 }
 
-@ini_set('display_errors','0');
-error_reporting(E_ALL);
-require_once __DIR__ . '/../includes/app.php';
-require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/bootstrap.php';
 
 require_admin_auth();
 

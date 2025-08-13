@@ -1,6 +1,5 @@
 <?php
-session_start();
-require_once __DIR__ . '/../includes/app.php';
+require_once __DIR__ . '/../includes/bootstrap.php';
 
 // Clear both old and new session data
 unset($_SESSION['admin_auth']);

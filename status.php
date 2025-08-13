@@ -1,7 +1,5 @@
 <?php
-require_once 'includes/config.php';
-require_once 'includes/app.php';
-require_once 'includes/auth.php';
+require_once 'includes/bootstrap.php';
 require_frontend_auth();
 include 'includes/header.php';
 ?>

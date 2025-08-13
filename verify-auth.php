@@ -3,8 +3,7 @@
 @ini_set('display_errors', '1');
 error_reporting(E_ALL);
 
-require_once 'includes/config.php';
-require_once 'includes/app.php';
+require_once 'includes/bootstrap.php';
 
 echo "<h2>MusicFLAC Authentication System Verification</h2>\n";
 

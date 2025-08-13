@@ -3,8 +3,70 @@
 
 // Note: This mirrors getMetadata.py logic without caching.
 
+function is_safe_url(string $url): bool {
+    $p = @parse_url($url);
+    if (!$p) return false;
+    
+    $scheme = strtolower($p['scheme'] ?? '');
+    if (!in_array($scheme, ['http','https'], true)) return false;
+    
+    $host = strtolower($p['host'] ?? '');
+    if ($host === '' ) return false;
+    
+    // Enhanced SSRF protection
+    // Block localhost variations
+    $localhost_patterns = [
+        'localhost', '127.0.0.1', '::1', '0.0.0.0',
+        '127.', '0x7f.', '017700000001', '2130706433'
+    ];
+    
+    foreach ($localhost_patterns as $pattern) {
+        if (strpos($host, $pattern) === 0) return false;
+    }
+    
+    // Block private IP ranges (IPv4)
+    if (preg_match('/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|169\.254\.)/', $host)) return false;
+    
+    // Block link-local and multicast
+    if (preg_match('/^(224\.|225\.|226\.|227\.|228\.|229\.|23[0-9]\.|24[0-9]\.|25[0-5]\.)/', $host)) return false;
+    
+    // Block IPv6 private ranges
+    if (preg_match('/^(fe80|fc00|fd|::ffff:0:|::ffff:127\.)/', $host)) return false;
+    
+    // Resolve hostname to IP and check again
+    $ip = @gethostbyname($host);
+    if ($ip && $ip !== $host) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return false;
+        }
+    }
+    
+    // Additional whitelist for known safe domains
+    $allowed_domains = [
+        'open.spotify.com', 'api.spotify.com', 'accounts.spotify.com',
+        'i.scdn.co', 'scontent.xx.fbcdn.net', 'embed.spotify.com',
+        'cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com',
+        'fonts.gstatic.com'
+    ];
+    
+    // Check if domain is in whitelist
+    foreach ($allowed_domains as $domain) {
+        if ($host === $domain || (strlen($host) > strlen($domain) && substr($host, -strlen('.' . $domain)) === '.' . $domain)) {
+            return true;
+        }
+    }
+    
+    // For non-whitelisted domains, be more restrictive
+    // Only allow if it's clearly external and not suspicious
+    if (strpos($host, '.') === false) return false; // No domain extension
+    if (preg_match('/^[0-9.]+$/', $host)) return false; // Direct IP access
+    
+    return true;
+}
+
 function http_get_json($url, $headers = [], $timeout = 15)
 {
+    if (!is_safe_url($url)) { debug_log('HTTP GET JSON blocked', ['url' => $url]); return ["error" => "Blocked URL"]; }
     debug_log('HTTP GET JSON start', ['url' => $url]);
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -33,6 +95,7 @@ function http_get_json($url, $headers = [], $timeout = 15)
 
 function http_get($url, $headers = [], $timeout = 15)
 {
+    if (!is_safe_url($url)) { debug_log('HTTP GET blocked', ['url' => $url]); return null; }
     debug_log('HTTP GET start', ['url' => $url]);
     $ch = curl_init();
     curl_setopt_array($ch, [

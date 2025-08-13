@@ -65,6 +65,48 @@ try {
                 echo json_encode(['error' => 'Servizio non disponibile']);
                 break;
             }
+            
+            // SECURITY: Validate cover image URL if provided
+            if (!empty($track['images'])) {
+                $img_url = $track['images'];
+                if (!is_safe_url($img_url)) {
+                    security_log_event('blocked_cover_url', ['url' => $img_url, 'reason' => 'unsafe_url']);
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Invalid cover image URL']);
+                    break;
+                }
+                
+                // Must be HTTPS from trusted domain
+                $parsed = parse_url($img_url);
+                if (!$parsed || ($parsed['scheme'] ?? '') !== 'https') {
+                    security_log_event('blocked_cover_url', ['url' => $img_url, 'reason' => 'not_https']);
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Cover image must be HTTPS']);
+                    break;
+                }
+                
+                $allowed_domains = [
+                    'i.scdn.co', 'mosaic.scdn.co', 'image-cdn-ak.spotifycdn.com',
+                    'images.genius.com', 'cdns-images.dzcdn.net', 
+                    'images.qobuz.com', 'resources.tidal.com'
+                ];
+                
+                $host = strtolower($parsed['host'] ?? '');
+                $allowed = false;
+                foreach ($allowed_domains as $domain) {
+                    if ($host === $domain || (strlen($host) > strlen($domain) && substr($host, -strlen('.' . $domain)) === '.' . $domain)) {
+                        $allowed = true;
+                        break;
+                    }
+                }
+                
+                if (!$allowed) {
+                    security_log_event('blocked_cover_url', ['url' => $img_url, 'reason' => 'domain_not_whitelisted', 'host' => $host]);
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Cover image domain not allowed']);
+                    break;
+                }
+            }
             try {
                 $path = downloadTrack($track, $service, $jobId);
                 debug_log('prepare_track_result', ['path' => $path, 'exists' => file_exists($path)]);
@@ -100,6 +142,49 @@ try {
                 http_response_code(400);
                 echo json_encode(['error' => 'Servizio non disponibile']);
                 break;
+            }
+            
+            // SECURITY: Validate all track image URLs in album
+            foreach ($tracks as $index => $track) {
+                if (!empty($track['images'])) {
+                    $img_url = $track['images'];
+                    if (!is_safe_url($img_url)) {
+                        security_log_event('blocked_album_cover_url', ['url' => $img_url, 'track_index' => $index, 'reason' => 'unsafe_url']);
+                        http_response_code(400);
+                        echo json_encode(['error' => "Invalid cover image URL in track $index"]);
+                        break 2; // Exit both foreach and case
+                    }
+                    
+                    $parsed = parse_url($img_url);
+                    if (!$parsed || ($parsed['scheme'] ?? '') !== 'https') {
+                        security_log_event('blocked_album_cover_url', ['url' => $img_url, 'track_index' => $index, 'reason' => 'not_https']);
+                        http_response_code(400);
+                        echo json_encode(['error' => "Cover image must be HTTPS in track $index"]);
+                        break 2;
+                    }
+                    
+                    $allowed_domains = [
+                        'i.scdn.co', 'mosaic.scdn.co', 'image-cdn-ak.spotifycdn.com',
+                        'images.genius.com', 'cdns-images.dzcdn.net', 
+                        'images.qobuz.com', 'resources.tidal.com'
+                    ];
+                    
+                    $host = strtolower($parsed['host'] ?? '');
+                    $allowed = false;
+                    foreach ($allowed_domains as $domain) {
+                        if ($host === $domain || (strlen($host) > strlen($domain) && substr($host, -strlen('.' . $domain)) === '.' . $domain)) {
+                            $allowed = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!$allowed) {
+                        security_log_event('blocked_album_cover_url', ['url' => $img_url, 'track_index' => $index, 'reason' => 'domain_not_whitelisted', 'host' => $host]);
+                        http_response_code(400);
+                        echo json_encode(['error' => "Cover image domain not allowed in track $index"]);
+                        break 2;
+                    }
+                }
             }
             try {
                 $zip = createAlbumZip($tracks, $album, $service, $jobId);

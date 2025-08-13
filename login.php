@@ -25,8 +25,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         } else {
             $result = user_login($username, $password);
             if ($result['success']) {
-                // Redirect to original page or index
+                // Redirect to original page or index (sanitized)
                 $redirect = $_GET['redirect'] ?? 'index.php';
+                $redirect = is_string($redirect) ? $redirect : 'index.php';
+                // Disallow schemes/hosts and header injection; allow only same-site relative paths
+                if (preg_match('/^https?:\/\//i', $redirect) || strpos($redirect, '//') === 0 || strpos($redirect, "\n") !== false || strpos($redirect, "\r") !== false) {
+                    $redirect = 'index.php';
+                }
+                if ($redirect === '' || $redirect[0] === '#') { $redirect = 'index.php'; }
                 header('Location: ' . $redirect);
                 exit;
             } else {
@@ -111,10 +117,12 @@ if (isset($_GET['logout'])) {
                     
                     <hr class="border-gray-600">
                     
-                    <p class="text-gray-400">
-                        Non hai ancora un account? 
-                        <a href="signup.php" class="text-green-500 hover:text-green-400 font-medium">Registrati qui</a>
-                    </p>
+                    <?php if ((int)app_get_setting('production_mode', 0) !== 1): ?>
+                      <p class="text-gray-400">
+                          Non hai ancora un account? 
+                          <a href="signup.php" class="text-green-500 hover:text-green-400 font-medium">Registrati qui</a>
+                      </p>
+                    <?php endif; ?>
                 </div>
             </div>
             

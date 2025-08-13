@@ -1,0 +1,130 @@
+# Security hardening .htaccess
+# Prevent access to sensitive files and directories
+
+# Block access to configuration and sensitive files
+<FilesMatch "\.(env|ini|conf|config|log|sql|bak|backup|swp|tmp|old|orig)$">
+    Require all denied
+</FilesMatch>
+
+# Block access to hidden files and directories
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Block access to specific directories
+RedirectMatch 403 ^/data/.*$
+RedirectMatch 403 ^/includes/.*$
+RedirectMatch 403 ^/cache/.*$
+RedirectMatch 403 ^/logs/.*$
+RedirectMatch 403 ^/\.git.*$
+
+# Block access to PHP source files in includes
+<Directory "includes">
+    <Files "*.php">
+        Require all denied
+    </Files>
+</Directory>
+
+# Prevent directory listing
+Options -Indexes
+
+# Prevent access to composer files
+<FilesMatch "composer\.(json|lock)">
+    Require all denied
+</FilesMatch>
+
+# Prevent access to package.json and similar
+<FilesMatch "(package|bower|yarn)\.(json|lock)">
+    Require all denied
+</FilesMatch>
+
+# Block common exploit attempts
+RewriteEngine On
+
+# Block suspicious query strings
+RewriteCond %{QUERY_STRING} (\.|%2e)(\.|%2e)(%2f|%5c|/) [NC,OR]
+RewriteCond %{QUERY_STRING} (php://|data://|expect://|zip://|phar://) [NC,OR]
+RewriteCond %{QUERY_STRING} (union.*select|drop.*table|insert.*into) [NC,OR]
+RewriteCond %{QUERY_STRING} (<script|javascript:|vbscript:|onload=) [NC]
+RewriteRule ^.*$ - [F,L]
+
+# Block suspicious user agents
+RewriteCond %{HTTP_USER_AGENT} (sqlmap|nikto|nessus|openvas|nmap|masscan) [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} (wget|curl).*python [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} (scanner|spider|bot).*exploit [NC]
+RewriteRule ^.*$ - [F,L]
+
+# Block suspicious request methods
+RewriteCond %{REQUEST_METHOD} ^(TRACE|DELETE|TRACK|DEBUG) [NC]
+RewriteRule ^.*$ - [F,L]
+
+# Force HTTPS (if supported)
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP_HOST} !^localhost
+RewriteCond %{HTTP_HOST} !^127\.0\.0\.1
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Set security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    Header always set Permissions-Policy "microphone=(), camera=(), geolocation=(), payment=(), usb=(), bluetooth=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    
+    # Remove server information
+    Header unset Server
+    Header unset X-Powered-By
+    
+    # Cache control for sensitive pages
+    <FilesMatch "\.(php)$">
+        Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+        Header always set Pragma "no-cache"
+        Header always set Expires "0"
+    </FilesMatch>
+</IfModule>
+
+# Disable server signature
+ServerSignature Off
+
+# Prevent PHP execution in upload directories
+<Directory "downloads">
+    php_flag engine off
+    AddType text/plain .php .php3 .phtml .pht .inc
+    RemoveHandler .php .phtml .php3 .php4 .php5 .inc
+</Directory>
+
+<Directory "data">
+    php_flag engine off
+    AddType text/plain .php .php3 .phtml .pht .inc
+    RemoveHandler .php .phtml .php3 .php4 .php5 .inc
+</Directory>
+
+# Limit file upload size (if not set in PHP)
+php_value upload_max_filesize 10M
+php_value post_max_size 10M
+
+# Disable dangerous PHP functions (if not disabled in php.ini)
+php_value disable_functions "exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source,file_get_contents,fopen,fread,fwrite,file_put_contents,fputs,fgets,fsockopen,gzopen,gzread,gzwrite,readfile,tmpfile,tempnam,glob"
+
+# Rate limiting (basic)
+<IfModule mod_evasive24.c>
+    DOSHashTableSize    2048
+    DOSPageCount        10
+    DOSSiteCount        100
+    DOSPageInterval     1
+    DOSSiteInterval     1
+    DOSBlockingPeriod   60
+</IfModule>
+
+# Prevent hotlinking
+RewriteEngine On
+RewriteCond %{HTTP_REFERER} !^$
+RewriteCond %{HTTP_REFERER} !^https?://(www\.)?yourdomain\.com [NC]
+RewriteCond %{REQUEST_URI} \.(jpe?g|gif|bmp|png|ico|pdf|zip|flac|mp3|mp4|avi|mov|wmv)$ [NC]
+RewriteRule ^.*$ - [F]
+
+# Block IP ranges (adjust as needed)
+# Require ip 192.168.1
+# Require not ip 192.168.1.100

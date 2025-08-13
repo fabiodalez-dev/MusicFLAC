@@ -41,6 +41,38 @@
       );
     }
 
+    // Toggle switch handling for admin settings
+    var toggles = document.querySelectorAll('label.cursor-pointer');
+    toggles.forEach(function(toggle) {
+      toggle.addEventListener('click', function(e) {
+        var checkbox = toggle.querySelector('input[type="checkbox"]');
+        var dot = toggle.querySelector('.dot');
+        
+        if (checkbox && dot) {
+          // Toggle checkbox state
+          checkbox.checked = !checkbox.checked;
+          
+          // Update visual state
+          if (checkbox.checked) {
+            dot.classList.add('translate-x-6', 'bg-green-400');
+          } else {
+            dot.classList.remove('translate-x-6', 'bg-green-400');
+          }
+          
+          // Animate the dot
+          gsap.to(dot, { duration: 0.2, ease: 'power2.out' });
+          
+          // Auto-submit the form
+          var form = toggle.closest('form');
+          if (form) {
+            setTimeout(function() {
+              form.submit();
+            }, 300);
+          }
+        }
+      });
+    });
+
     // ScrollReveal for cards (if ScrollTrigger available)
     if (gsap.ScrollTrigger) {
       gsap.utils.toArray('.bg-gray-800, .card').forEach(function(el){
